@@ -6,6 +6,7 @@ import hashlib
 import json
 import sqlite3
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -35,19 +36,40 @@ class TelemetryLedger:
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=30)
         connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA busy_timeout=30000")
         connection.execute("PRAGMA synchronous=FULL")
         return connection
 
     def _init_store(self) -> None:
-        with self._connect() as connection:
-            connection.execute(
-                """CREATE TABLE IF NOT EXISTS events (
-                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-                    event_json TEXT NOT NULL,
-                    event_hash TEXT NOT NULL UNIQUE
-                )"""
-            )
+        attempts = 6
+        for attempt in range(attempts):
+            connection = self._connect()
+            try:
+                mode = connection.execute("PRAGMA journal_mode=WAL").fetchone()
+                if mode is None or str(mode[0]).casefold() != "wal":
+                    raise sqlite3.OperationalError(
+                        f"Could not enable SQLite WAL mode: {mode!r}"
+                    )
+                connection.execute(
+                    """CREATE TABLE IF NOT EXISTS events (
+                        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                        event_json TEXT NOT NULL,
+                        event_hash TEXT NOT NULL UNIQUE
+                    )"""
+                )
+                connection.commit()
+                return
+            except sqlite3.OperationalError as error:
+                connection.rollback()
+                transient = any(
+                    marker in str(error).casefold()
+                    for marker in ("database is locked", "database is busy")
+                )
+                if not transient or attempt == attempts - 1:
+                    raise
+            finally:
+                connection.close()
+            time.sleep(0.02 * (2**attempt))
 
     def append(
         self,

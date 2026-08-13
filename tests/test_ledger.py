@@ -54,3 +54,42 @@ def test_ledger_detects_tampering(tmp_path) -> None:
 
     with pytest.raises(LedgerIntegrityError):
         ledger.verify()
+
+
+def test_ledger_retries_transient_wal_initialization_lock(tmp_path, monkeypatch) -> None:
+    from hco import ledger as ledger_module
+
+    real_connect = sqlite3.connect
+    wal_attempts = 0
+
+    class ConnectionProxy:
+        def __init__(self, connection):
+            self._connection = connection
+
+        def execute(self, sql, parameters=()):
+            nonlocal wal_attempts
+            if sql == "PRAGMA journal_mode=WAL":
+                wal_attempts += 1
+                if wal_attempts == 1:
+                    raise sqlite3.OperationalError("database is locked")
+            return self._connection.execute(sql, parameters)
+
+        def __getattr__(self, name):
+            return getattr(self._connection, name)
+
+        def __enter__(self):
+            self._connection.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self._connection.__exit__(*args)
+
+    def locked_once_connect(*args, **kwargs):
+        return ConnectionProxy(real_connect(*args, **kwargs))
+
+    monkeypatch.setattr(ledger_module.sqlite3, "connect", locked_once_connect)
+
+    ledger = TelemetryLedger(tmp_path / "ledger.sqlite3")
+
+    assert wal_attempts == 2
+    assert ledger.verify() == 0
