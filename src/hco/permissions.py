@@ -47,10 +47,11 @@ def harden_state_files(home: str | Path) -> list[Path]:
     for path in paths:
         try:
             harden_private_path(path)
-        except PermissionError:
+        except (PermissionError, FileNotFoundError):
             # SQLite may remove transient -wal/-shm files between listing and
-            # icacls. Ignore only a file that genuinely vanished; preserve
-            # fail-closed behavior for every file that still exists.
+            # OS permission hardening. Windows commonly surfaces PermissionError;
+            # POSIX chmod surfaces FileNotFoundError. Ignore only a path that
+            # genuinely vanished; preserve fail-closed behavior if it still exists.
             if path.exists():
                 raise
             continue

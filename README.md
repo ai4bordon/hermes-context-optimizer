@@ -2,7 +2,7 @@
 
 `hermes-context-optimizer` — экспериментальный plugin для [Hermes Agent](https://github.com/NousResearch/hermes-agent), который уменьшает большие результаты read-only инструментов перед отправкой в LLM, но сохраняет и детерминированно возвращает обязательные фрагменты.
 
-> **Текущий статус: release candidate `0.1.7`.** Версия прошла isolated qualification, targeted A/B и финальную decision-grade матрицу. Рекомендуется для ограниченного тестирования в отдельном Hermes profile с заранее подготовленным rollback. Это пока не универсальная production-рекомендация для всех профилей, инструментов и операционных систем.
+> **Текущий статус: release candidate `0.1.8`.** Версия `0.1.8` сохраняет проверенное optimizer-поведение `0.1.7` и добавляет переносимую обработку SQLite sidecar race на Linux/macOS. Рекомендуется для ограниченного тестирования в отдельном Hermes profile с заранее подготовленным rollback. Это пока не универсальная production-рекомендация для всех профилей, инструментов и операционных систем.
 
 ## Зачем нужен HCO
 
@@ -175,7 +175,7 @@ Linux:      EXPECTED, NOT YET VERIFIED
 Сначала создайте отдельное Python environment или тестовый Hermes profile. Не начинайте с основного рабочего Gateway.
 
 ```bash
-uv pip install --python <isolated-python> dist/hermes_context_optimizer-0.1.7-py3-none-any.whl
+uv pip install --python <isolated-python> dist/hermes_context_optimizer-0.1.8-py3-none-any.whl
 ```
 
 Проверьте artifact по файлу `SHA256SUMS`, приложенному к конкретному GitHub Release. Checksum хранится отдельно от README, потому что README входит в wheel и меняет его hash при каждом обновлении документации.

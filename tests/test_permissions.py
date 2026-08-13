@@ -5,6 +5,8 @@ from __future__ import annotations
 import getpass
 import os
 
+import pytest
+
 from hco.permissions import acl_readback, harden_private_path, harden_state_files
 
 
@@ -53,3 +55,22 @@ def test_harden_state_files_ignores_sidecar_that_vanishes_during_hardening(
     hardened = harden_state_files(home)
 
     assert hardened == [first]
+
+
+def test_harden_state_files_preserves_fail_closed_for_existing_path(
+    tmp_path, monkeypatch
+) -> None:
+    home = tmp_path / "hco"
+    home.mkdir()
+    target = home / "store.sqlite3"
+    target.write_bytes(b"state")
+
+    from hco import permissions
+
+    def fail_hardening(path):
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr(permissions, "harden_private_path", fail_hardening)
+
+    with pytest.raises(FileNotFoundError):
+        harden_state_files(home)
