@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hermes-context-optimizer"
-version = "0.1.8"
+version = "0.1.9"
 description = "Deterministic proactive tool-context optimization for Hermes Agent"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -19,6 +19,25 @@ test = ["pytest>=8.0", "pytest-cov>=5.0", "PyYAML>=6.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hco"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/LICENSE",
+    "/README.md",
+    "/pyproject.toml",
+    "/uv.lock",
+    "/plugin",
+    "/src",
+    "/tests",
+]
+exclude = [
+    "**/__pycache__",
+    "**/*.pyc",
+    "**/*.pyo",
+    "**/.pytest_cache",
+    "**/*.sqlite3",
+    "**/*.sqlite3-*",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
