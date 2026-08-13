@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hermes-context-optimizer"
+version = "0.1.7"
+description = "Deterministic proactive tool-context optimization for Hermes Agent"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.11"
+dependencies = []
+
+[project.entry-points."hermes_agent.plugins"]
+hermes-context-optimizer = "hco.hermes_registration"
+
+[project.optional-dependencies]
+test = ["pytest>=8.0", "pytest-cov>=5.0", "PyYAML>=6.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hco"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

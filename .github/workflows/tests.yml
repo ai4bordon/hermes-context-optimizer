@@ -1,0 +1,32 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.11", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync --extra test
+      - name: Verify project import provenance
+        shell: bash
+        run: |
+          unset VIRTUAL_ENV PYTHONPATH
+          export PYTHONNOUSERSITE=1
+          uv run python -c "from pathlib import Path; import hco.optimizer as o; p=Path(o.__file__).resolve(); assert p.parent.name == 'hco' and p.parent.parent.name == 'src'; print(p)"
+      - name: Run tests
+        shell: bash
+        run: |
+          unset VIRTUAL_ENV PYTHONPATH
+          export PYTHONNOUSERSITE=1
+          uv run pytest tests -q
+      - run: uv build

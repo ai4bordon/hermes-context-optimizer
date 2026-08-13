@@ -1,0 +1,104 @@
+"""Append-only SQLite ledger with canonical SHA-256 hash chain."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import sqlite3
+import threading
+from pathlib import Path
+from typing import Any
+
+
+class LedgerIntegrityError(RuntimeError):
+    """Ledger hash chain or canonical event hash is invalid."""
+
+
+def _canonical(payload: dict[str, Any]) -> bytes:
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+class TelemetryLedger:
+    """Process-safe local ledger serialized by SQLite BEGIN IMMEDIATE."""
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
+        self._init_store()
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.path, timeout=30)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA synchronous=FULL")
+        return connection
+
+    def _init_store(self) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS events (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_json TEXT NOT NULL,
+                    event_hash TEXT NOT NULL UNIQUE
+                )"""
+            )
+
+    def append(
+        self,
+        *,
+        event_type: str,
+        attempt_id: str,
+        decision: str,
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
+        with self._lock, self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            last = connection.execute(
+                "SELECT event_hash FROM events ORDER BY sequence DESC LIMIT 1"
+            ).fetchone()
+            previous_hash = str(last["event_hash"]) if last else "0" * 64
+            event: dict[str, Any] = {
+                "schema_version": "hco.telemetry.v1",
+                "event_type": event_type,
+                "attempt_id": attempt_id,
+                "decision": decision,
+                "data": data,
+                "previous_event_hash": previous_hash,
+            }
+            event["event_hash"] = hashlib.sha256(_canonical(event)).hexdigest()
+            connection.execute(
+                "INSERT INTO events (event_json, event_hash) VALUES (?, ?)",
+                (
+                    _canonical(event).decode("utf-8"),
+                    event["event_hash"],
+                ),
+            )
+            connection.commit()
+            return event
+
+    def verify(self) -> int:
+        with self._lock, self._connect() as connection:
+            rows = connection.execute(
+                "SELECT sequence, event_json, event_hash FROM events ORDER BY sequence"
+            ).fetchall()
+        previous = "0" * 64
+        for row in rows:
+            event = json.loads(row["event_json"])
+            observed_hash = event.pop("event_hash", None)
+            if event.get("previous_event_hash") != previous:
+                raise LedgerIntegrityError(
+                    f"Invalid previous hash at ledger sequence {row['sequence']}"
+                )
+            expected_hash = hashlib.sha256(_canonical(event)).hexdigest()
+            if observed_hash != expected_hash or row["event_hash"] != expected_hash:
+                raise LedgerIntegrityError(
+                    f"Invalid event hash at ledger sequence {row['sequence']}"
+                )
+            previous = expected_hash
+        return len(rows)
