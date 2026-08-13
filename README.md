@@ -139,9 +139,15 @@ Provider/ledger correlation: 72/72
 
 Основной qualification выполнялся с Python `3.11` и Hermes Agent `0.18.0` (`2026.7.1`, upstream `6fcd470d`).
 
-### macOS и Linux
+### Автоматически проверено на macOS и Linux
 
-**Архитектурно HCO должен устанавливаться на macOS и Linux**, потому что:
+GitHub Actions успешно выполнил полный standalone package suite и сборку wheel на:
+
+- `windows-latest` с Python `3.11` и `3.12`;
+- `macos-latest` с Python `3.11` и `3.12`;
+- `ubuntu-latest` с Python `3.11` и `3.12`.
+
+Это подтверждает переносимость core package, включая POSIX permissions и SQLite sidecar race handling. Переносимость также поддерживается следующими свойствами:
 
 - wheel имеет portable формат `py3-none-any`;
 - package написан на чистом Python;
@@ -150,15 +156,15 @@ Provider/ledger correlation: 72/72
 - SQLite доступен в стандартной библиотеке Python;
 - на Windows применяется `icacls`, а на POSIX-системах — permissions `0700` для каталогов и `0600` для файлов.
 
-Но сейчас важно различать ожидание и доказанный факт:
+Важно различать автоматическую проверку package и полноценную live qualification Hermes:
 
 ```text
-Windows 10: VERIFIED
-macOS:      EXPECTED, NOT YET VERIFIED
-Linux:      EXPECTED, NOT YET VERIFIED
+Windows 10: FULL LIVE QUALIFICATION
+macOS:      AUTOMATED PACKAGE/BUILD PASS; LIVE CANARY NOT YET VERIFIED
+Ubuntu:     AUTOMATED PACKAGE/BUILD PASS; LIVE CANARY NOT YET VERIFIED
 ```
 
-На macOS/Linux пока не выполнялись реальные Gateway/profile canary, SQLite sidecar permission readback и model A/B. Первым коллегам на этих ОС следует использовать отдельный тестовый `HERMES_HOME` или Hermes profile, не основной рабочий профиль.
+На macOS/Linux пока не выполнялись реальные Gateway/profile canary, runtime-created SQLite sidecar permission readback внутри Hermes и model A/B. Поэтому первым коллегам на этих ОС всё ещё следует использовать отдельный тестовый `HERMES_HOME` или Hermes profile, не основной рабочий профиль.
 
 ## Требования
 
