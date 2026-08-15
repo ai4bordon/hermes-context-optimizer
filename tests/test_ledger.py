@@ -93,3 +93,20 @@ def test_ledger_retries_transient_wal_initialization_lock(tmp_path, monkeypatch)
 
     assert wal_attempts == 2
     assert ledger.verify() == 0
+
+
+def test_ledger_reports_compression_and_fallback_rates(tmp_path) -> None:
+    ledger = TelemetryLedger(tmp_path / "ledger.sqlite3")
+    for decision in ("compact", "passthrough"):
+        ledger.append(event_type="tool_result", attempt_id=decision, decision=decision, data={})
+    for decision in ("proactive_expand", "proactive_expand", "full_fallback"):
+        ledger.append(event_type="llm_request", attempt_id=decision, decision=decision, data={})
+
+    metrics = ledger.metrics()
+
+    assert metrics["tool_results"] == 2
+    assert metrics["compressed"] == 1
+    assert metrics["compression_rate"] == 0.5
+    assert metrics["optimized_requests"] == 3
+    assert metrics["fallbacks"] == 1
+    assert metrics["fallback_rate"] == 1 / 3

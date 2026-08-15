@@ -231,3 +231,9 @@ def test_surrounding_punctuation_does_not_drop_mandatory_evidence_ids(
     assert "SRC-233" in serialized
     assert "https://example.org/public/reminders-233" in serialized
     assert "Telegram reminder bot" in serialized
+def test_explicit_identifier_grammar_covers_realistic_structured_namespaces() -> None:
+    for identifier in (
+        "LOG-041", "CODE-052", "CFG-033", "DEP-061", "DOC-025",
+        "SEC-044", "MKT-039", "MET-031", "API-047", "DAT-042", "OPS-054",
+    ):
+        assert _EXPLICIT_IDENTIFIER_RE.fullmatch(identifier), identifier

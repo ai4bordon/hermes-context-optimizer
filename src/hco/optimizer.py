@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import re
 import sqlite3
 import time
@@ -28,12 +29,13 @@ _UPSTREAM_TRUNCATION_RE = re.compile(
 )
 _READ_FILE_LINE_PREFIX_RE = re.compile(r"(?m)^\d+\|")
 _TOKEN_RE = re.compile(r"[\w./:\\+-]+", re.UNICODE)
+_IDENTIFIER_NAMESPACES = "SRC|EV|ACCT|AP|LOG|CODE|CFG|DEP|DOC|SEC|MKT|MET|API|DAT|OPS"
 _EXPLICIT_IDENTIFIER_RE = re.compile(
-    r"^(?:SRC|EV|ACCT|AP)-[A-Za-z0-9][A-Za-z0-9_-]{1,63}$",
+    rf"^(?:{_IDENTIFIER_NAMESPACES})-[A-Za-z0-9][A-Za-z0-9_-]{{1,63}}$",
     re.IGNORECASE,
 )
 _EXPLICIT_IDENTIFIER_SCAN_RE = re.compile(
-    r"(?<![A-Za-z0-9_-])(?:SRC|EV|ACCT|AP)-[A-Za-z0-9][A-Za-z0-9_-]{1,63}(?![A-Za-z0-9_-])",
+    rf"(?<![A-Za-z0-9_-])(?:{_IDENTIFIER_NAMESPACES})-[A-Za-z0-9][A-Za-z0-9_-]{{1,63}}(?![A-Za-z0-9_-])",
     re.IGNORECASE,
 )
 _SECRET_VALUE_RE = re.compile(
@@ -57,6 +59,19 @@ _SENSITIVE_KEY_RE = re.compile(
     r"(?ix)^(?:.*[_-])?(?:api[_-]?key|password|client[_-]?secret|access[_-]?token|refresh[_-]?token|oauth[_-]?token|session[_-]?id|telegram[_-]?bot[_-]?token|private[_-]?key|secret|key|token)$"
 )
 _NON_SECRET_VALUES = {"", "redacted", "masked", "none", "null", "example", "placeholder"}
+
+
+def _search_tokens(value: str) -> list[str]:
+    """Tokenize prose and split common identifier separators for retrieval."""
+    tokens: list[str] = []
+    for token in _TOKEN_RE.findall(value):
+        folded = token.casefold()
+        tokens.append(folded)
+        tokens.extend(
+            part for part in re.split(r"[_./:\\+-]+", folded)
+            if len(part) >= 3 and part != folded
+        )
+    return tokens
 
 
 @dataclass(frozen=True)
@@ -387,22 +402,25 @@ class ContextOptimizer:
                 return self._full_fallback(messages, hashes, session_id=session_id)
             selected_by_hash[source_hash] = selected
 
-        expanded = copy.deepcopy(messages)
-        for message in expanded:
+        additions: list[Any] = []
+        for message in messages:
             content = message.get("content")
             if not isinstance(content, str):
                 continue
             found = _MARKER_RE.findall(content)
             if not found:
                 continue
-            additions = []
             for source_hash in found:
                 additions.extend(
                     fragment["content"] for fragment in selected_by_hash[source_hash]
                 )
-            message["content"] = content + "\n<hco-proactive-fragments>\n" + json.dumps(
+        expanded = copy.deepcopy(messages)
+        expanded.append({
+            "role": "user",
+            "content": "<hco-proactive-fragments>\n" + json.dumps(
                 additions, ensure_ascii=False, separators=(",", ":")
-            ) + "\n</hco-proactive-fragments>"
+            ) + "\n</hco-proactive-fragments>",
+        })
         return PreparedRequest(
             messages=expanded,
             receipt=CoverageReceipt("proactive_expand", True, tuple(dict.fromkeys(hashes))),
@@ -426,9 +444,7 @@ class ContextOptimizer:
         if row is None:
             return [], False
         fragments = json.loads(row["fragments_json"])
-        terms = list(dict.fromkeys(
-            term.casefold() for term in _TOKEN_RE.findall(query) if len(term) >= 3
-        ))
+        terms = list(dict.fromkeys(term for term in _search_tokens(query) if len(term) >= 3))
 
         # Explicit IDs in a query are mandatory coverage facets.  A lexical
         # top-score alone can otherwise select SRC-145 while silently dropping
@@ -459,22 +475,67 @@ class ContextOptimizer:
                 return [], False
             return selected, True
 
-        scored: list[tuple[int, int, dict[str, Any]]] = []
-        for fragment in fragments:
-            text = json.dumps(fragment["content"], ensure_ascii=False, default=str).casefold()
-            score = sum(1 for term in terms if term in text)
-            if score:
+        if not terms:
+            return [], False
+        tokenized = [
+            _search_tokens(
+                json.dumps(fragment["content"], ensure_ascii=False, default=str)
+            )
+            for fragment in fragments
+        ]
+        average_length = sum(map(len, tokenized)) / max(1, len(tokenized))
+        document_frequency = {
+            term: sum(term in document for document in tokenized) for term in terms
+        }
+        scored: list[tuple[float, int, dict[str, Any]]] = []
+        for fragment, document in zip(fragments, tokenized):
+            score = 0.0
+            length_normalization = 1 - 0.75 + 0.75 * len(document) / max(1.0, average_length)
+            for term in terms:
+                frequency = document.count(term)
+                if not frequency:
+                    continue
+                inverse_frequency = math.log(
+                    1 + (len(fragments) - document_frequency[term] + 0.5)
+                    / (document_frequency[term] + 0.5)
+                )
+                score += inverse_frequency * (frequency * 2.2) / (
+                    frequency + 1.2 * length_normalization
+                )
+            if score > 0:
                 scored.append((score, -int(fragment["position"]), fragment))
         if not scored:
             return [], False
         scored.sort(reverse=True, key=lambda item: (item[0], item[1]))
+        matched_terms = {
+            term for term in terms if any(term in document for document in tokenized)
+        }
+        required_matches = min(len(terms), 2)
+        if len(matched_terms) < required_matches:
+            return [], False
         best_score = scored[0][0]
-        selected = [fragment for score, _, fragment in scored if score == best_score][:8]
-        # Several equal best matches are ambiguous unless a single fragment
-        # covers every meaningful query facet. Conservative fallback protects
-        # conflicting current/stale records and duplicated identifiers.
-        confident = len(selected) == 1 and best_score >= max(1, min(len(terms), 2))
-        return selected, confident
+        second_score = scored[1][0] if len(scored) > 1 else 0.0
+        if second_score and best_score / second_score < 1.2:
+            return [], False
+        primary = [
+            fragment for score, _, fragment in scored
+            if score >= best_score * 0.75
+        ][:4]
+        positions = {int(fragment["position"]) for fragment in primary}
+        for position in tuple(positions):
+            positions.update(candidate for candidate in (position - 1, position + 1)
+                             if 0 <= candidate < len(fragments))
+        if len(positions) > 8:
+            return [], False
+        selected = [fragments[position] for position in sorted(positions)]
+        selected_documents = [tokenized[position] for position in sorted(positions)]
+        selected_terms = {
+            term for term in terms
+            if any(term in document for document in selected_documents)
+        }
+        if len(selected_terms) < required_matches:
+            return [], False
+        return selected, True
 
     def _full_fallback(
         self,

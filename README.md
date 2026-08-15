@@ -2,7 +2,7 @@
 
 `hermes-context-optimizer` — экспериментальный plugin для [Hermes Agent](https://github.com/NousResearch/hermes-agent), который уменьшает большие результаты read-only инструментов перед отправкой в LLM, но сохраняет и детерминированно возвращает обязательные фрагменты.
 
-> **Текущий статус: release candidate `0.1.10`.** Версия `0.1.10` сохраняет проверенное optimizer-поведение `0.1.7`, добавляет переносимую обработку SQLite races, использует жёсткий allowlist для source distribution и выпускает кроссплатформенный `SHA256SUMS` с LF. Рекомендуется для ограниченного тестирования в отдельном Hermes profile с заранее подготовленным rollback. Это пока не универсальная production-рекомендация для всех профилей, инструментов и операционных систем.
+> **Текущий статус: release candidate `0.1.11`.** Версия `0.1.11` сохраняет fail-closed контракты, добавляет cache-stable tail injection, length-normalized retrieval, соседние fragments, расширенные structured ID namespaces и агрегированные telemetry rates. Рекомендуется для ограниченного тестирования в отдельном Hermes profile с заранее подготовленным rollback. Это пока не универсальная production-рекомендация для всех профилей, инструментов и операционных систем.
 
 ## Зачем нужен HCO
 
@@ -68,6 +68,21 @@ HCO не должен автоматически сокращать:
 - Штатный Hermes `context.engine: compressor` остаётся активным.
 
 ## Результаты тестирования
+
+### Реалистичная матрица HCO 0.1.11
+
+Проверены 20 классов задач по три повтора в режимах baseline и HCO: логи, multi-file code tracing, config precedence, rollback, current/stale policy, security boundaries, prompt injection, deadlocks, pricing, missing evidence и соседний контекст.
+
+```text
+Baseline quality: 60/60
+HCO quality:      60/60
+Provider errors:  0
+Unknown IDs:      0
+```
+
+В cold-run provider billing HCO снизил фактическую стоимость на 95,22%. Отдельная large-prefix проверка измерила baseline с 149 059 input tokens и реальным provider cache saving 89,50%: warm baseline стоил `$0.001293` за запрос, а наблюдаемая стоимость малого HCO-запроса — `$0.000084`. В этом ограниченном сравнении HCO был дешевле в 15,39 раза, или на 93,50%.
+
+Это decision-grade synthetic evidence на одной модели/provider, а не гарантия для произвольного corpus, тарифа или cache implementation. Latency и стоимость следует повторно измерять в целевом окружении.
 
 ### Финальная serious matrix для HCO 0.1.7
 
@@ -181,7 +196,7 @@ Ubuntu:     AUTOMATED PACKAGE/BUILD PASS; LIVE CANARY NOT YET VERIFIED
 Сначала создайте отдельное Python environment или тестовый Hermes profile. Не начинайте с основного рабочего Gateway.
 
 ```bash
-uv pip install --python <isolated-python> dist/hermes_context_optimizer-0.1.10-py3-none-any.whl
+uv pip install --python <isolated-python> dist/hermes_context_optimizer-0.1.11-py3-none-any.whl
 ```
 
 Проверьте artifact по файлу `SHA256SUMS`, приложенному к конкретному GitHub Release. Checksum хранится отдельно от README, потому что README входит в wheel и меняет его hash при каждом обновлении документации.
@@ -255,6 +270,10 @@ Security properties кандидата:
 - POSIX `0700/0600` permissions;
 - hardening основных SQLite-файлов и `-wal`/`-shm` sidecars;
 - append-only telemetry с проверкой hash chain.
+- cache-stable proactive expansion: выбранные fragments добавляются одним хвостовым сообщением, не переписывая старые сообщения;
+- BM25-подобный length-normalized retrieval с bounded top-k, score-gap gate и соседними fragments `±1`;
+- `TelemetryLedger.metrics()` вычисляет фактические `compression_rate` и `fallback_rate` из append-only ledger.
+- Partial lexical facet coverage не считается полной выборкой и приводит к conservative fallback.
 
 Ограничения:
 

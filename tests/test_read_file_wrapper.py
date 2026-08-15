@@ -85,7 +85,7 @@ def test_complete_read_file_wrapper_unwraps_inner_json_for_multi_id_retrieval(tm
     assert "login-required" in serialized
     assert "https://example.org/public/fallback-145" in serialized
     assert len(prepared.messages[1]["content"]) < len(wrapper) // 4
-    additions = prepared.messages[1]["content"].split("<hco-proactive-fragments>", 1)[1]
+    additions = prepared.messages[-1]["content"].split("<hco-proactive-fragments>", 1)[1]
     assert "SRC-000" not in additions
 
 

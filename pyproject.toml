@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hermes-context-optimizer"
-version = "0.1.10"
+version = "0.1.11"
 description = "Deterministic proactive tool-context optimization for Hermes Agent"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -23,6 +23,7 @@ packages = ["src/hco"]
 [tool.hatch.build.targets.sdist]
 include = [
     "/LICENSE",
+    "/CHANGELOG.md",
     "/README.md",
     "/pyproject.toml",
     "/uv.lock",

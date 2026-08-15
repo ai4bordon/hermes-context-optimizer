@@ -124,3 +124,27 @@ class TelemetryLedger:
                 )
             previous = expected_hash
         return len(rows)
+
+    def metrics(self) -> dict[str, int | float]:
+        """Return decision rates derived from the append-only ledger."""
+        with self._lock, self._connect() as connection:
+            rows = connection.execute(
+                "SELECT event_json FROM events ORDER BY sequence"
+            ).fetchall()
+        events = [json.loads(row["event_json"]) for row in rows]
+        tool_events = [event for event in events if event["event_type"] == "tool_result"]
+        request_events = [event for event in events if event["event_type"] == "llm_request"]
+        compressed = sum(event["decision"] == "compact" for event in tool_events)
+        optimized = sum(
+            event["decision"] in {"proactive_expand", "full_fallback"}
+            for event in request_events
+        )
+        fallbacks = sum(event["decision"] == "full_fallback" for event in request_events)
+        return {
+            "tool_results": len(tool_events),
+            "compressed": compressed,
+            "compression_rate": compressed / len(tool_events) if tool_events else 0.0,
+            "optimized_requests": optimized,
+            "fallbacks": fallbacks,
+            "fallback_rate": fallbacks / optimized if optimized else 0.0,
+        }

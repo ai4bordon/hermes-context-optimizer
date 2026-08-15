@@ -18,6 +18,7 @@ FORBIDDEN_PARTS = {
 }
 ALLOWED_SDIST_ROOT_ITEMS = {
     ".gitignore",
+    "CHANGELOG.md",
     "LICENSE",
     "README.md",
     "pyproject.toml",
