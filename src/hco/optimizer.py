@@ -9,6 +9,7 @@ import math
 import re
 import sqlite3
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -163,11 +164,20 @@ class ContextOptimizer:
         self.retention_max_rows = retention_max_rows
         self._init_store()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
         connection = sqlite3.connect(self.store_path)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA secure_delete=ON")
-        return connection
+        try:
+            yield connection
+        except Exception:
+            connection.rollback()
+            raise
+        else:
+            connection.commit()
+        finally:
+            connection.close()
 
     def _init_store(self) -> None:
         with self._connect() as connection:
@@ -503,9 +513,9 @@ class ContextOptimizer:
                 "SELECT fragments_json FROM sources WHERE source_hash = ? AND session_id = ?",
                 (source_hash, session_id),
             ).fetchone()
-        if row is None:
-            return [], False
-        fragments = json.loads(row["fragments_json"])
+            if row is None:
+                return [], False
+            fragments = json.loads(str(row["fragments_json"]))
         terms = list(dict.fromkeys(term for term in _search_tokens(query) if len(term) >= 3))
 
         # Explicit IDs in a query are mandatory coverage facets.  A lexical

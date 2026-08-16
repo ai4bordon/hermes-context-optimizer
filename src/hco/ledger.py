@@ -7,6 +7,7 @@ import json
 import sqlite3
 import threading
 import time
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -79,7 +80,7 @@ class TelemetryLedger:
         decision: str,
         data: dict[str, Any],
     ) -> dict[str, Any]:
-        with self._lock, self._connect() as connection:
+        with self._lock, closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             last = connection.execute(
                 "SELECT event_hash FROM events ORDER BY sequence DESC LIMIT 1"
@@ -105,7 +106,7 @@ class TelemetryLedger:
             return event
 
     def verify(self) -> int:
-        with self._lock, self._connect() as connection:
+        with self._lock, closing(self._connect()) as connection:
             rows = connection.execute(
                 "SELECT sequence, event_json, event_hash FROM events ORDER BY sequence"
             ).fetchall()
@@ -127,7 +128,7 @@ class TelemetryLedger:
 
     def metrics(self) -> dict[str, int | float]:
         """Return decision rates derived from the append-only ledger."""
-        with self._lock, self._connect() as connection:
+        with self._lock, closing(self._connect()) as connection:
             rows = connection.execute(
                 "SELECT event_json FROM events ORDER BY sequence"
             ).fetchall()
