@@ -10,13 +10,16 @@
 - Structured evidence namespaces for `LOG`, `CODE`, `CFG`, `DEP`, `DOC`, `SEC`, `MKT`, `MET`, `API`, `DAT`, and `OPS` in addition to the existing namespaces.
 - `TelemetryLedger.metrics()` with `compression_rate` and `fallback_rate` derived from the append-only ledger.
 - Regression coverage for prefix preservation, long-fragment bias, neighboring context, telemetry aggregation, and realistic evidence namespaces.
+- Fail-closed mixed explicit-ID and lexical-facet coverage.
+- Structural validation for canonical HCO compact envelopes; malformed, nested, duplicate, mismatched, unclosed, and stray markers are rejected.
 
 ### Verification
 
-- Source suite: 90 passed; optional host-source integration skipped in the standalone run.
-- Hermes discovery integration: 1 passed against the installed Hermes source.
-- Decision-grade model matrix: baseline 60/60 and HCO 60/60, with zero provider errors and zero unknown evidence IDs.
-- Large-prefix provider-cache study: 89.50% observed billing cache saving; bounded observed HCO request cost was 93.50% lower than the warm large-context baseline in the tested environment.
+- Standalone source suite: 104 passed, 1 optional Hermes discovery test skipped when host source is absent.
+- Separate Hermes discovery integration: 1 passed against the installed Hermes source; combined suite count with host source available is 105 passed.
+- Decision-grade model matrix: baseline 120/120 and HCO 120/120 across six repeats, with zero provider errors and zero unknown evidence IDs.
+- Provider billing reconciliation for the same 240 accepted attempts: baseline `$0.186496`, HCO `$0.012073`, actual saving 93.53% (15.45×), based on a hash-addressed usage export and exact token-pair correlation.
+- Large-prefix provider-cache study: 89.50% observed billing cache saving; the observed small HCO request cost was 93.50% lower than the warm large-context baseline in a separate descriptive cross-run comparison (not a paired controlled measurement).
 
 ### Limitations
 

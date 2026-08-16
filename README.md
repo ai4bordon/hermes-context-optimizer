@@ -71,16 +71,16 @@ HCO не должен автоматически сокращать:
 
 ### Реалистичная матрица HCO 0.1.11
 
-Проверены 20 классов задач по три повтора в режимах baseline и HCO: логи, multi-file code tracing, config precedence, rollback, current/stale policy, security boundaries, prompt injection, deadlocks, pricing, missing evidence и соседний контекст.
+Проверены 20 классов задач по шесть повторов в режимах baseline и HCO: логи, multi-file code tracing, config precedence, rollback, current/stale policy, security boundaries, prompt injection, deadlocks, pricing, missing evidence и соседний контекст.
 
 ```text
-Baseline quality: 60/60
-HCO quality:      60/60
+Baseline quality: 120/120
+HCO quality:      120/120
 Provider errors:  0
 Unknown IDs:      0
 ```
 
-В cold-run provider billing HCO снизил фактическую стоимость на 95,22%. Отдельная large-prefix проверка измерила baseline с 149 059 input tokens и реальным provider cache saving 89,50%: warm baseline стоил `$0.001293` за запрос, а наблюдаемая стоимость малого HCO-запроса — `$0.000084`. В этом ограниченном сравнении HCO был дешевле в 15,39 раза, или на 93,50%.
+В текущей six-repeat матрице provider CSV подтверждает фактическую стоимость `$0.186496` для baseline и `$0.012073` для HCO: **93,53% actual billing saving**, или **15,45× дешевле**. Это descriptive A/B measurement для данного provider export, модели, тарифа и corpus, а не универсальная гарантия production-экономики. Отдельный исторический large-prefix прогон измерил baseline с 149 059 input tokens и provider cache saving 89,50%: warm baseline стоил `$0.001293` за запрос. Наблюдаемая стоимость малого HCO-запроса в другом прогоне — `$0.000084`; это отдельное cross-run сопоставление, не paired controlled measurement текущей матрицы.
 
 Это decision-grade synthetic evidence на одной модели/provider, а не гарантия для произвольного corpus, тарифа или cache implementation. Latency и стоимость следует повторно измерять в целевом окружении.
 
@@ -270,7 +270,7 @@ Security properties кандидата:
 - POSIX `0700/0600` permissions;
 - hardening основных SQLite-файлов и `-wal`/`-shm` sidecars;
 - append-only telemetry с проверкой hash chain.
-- cache-stable proactive expansion: выбранные fragments добавляются одним хвостовым сообщением, не переписывая старые сообщения;
+- cache-stable proactive expansion: все сообщения до изменяемого request tail остаются byte-stable; если transcript заканчивается `user`, fragments добавляются в этот trailing user content для сохранения role protocol, иначе создаётся отдельное хвостовое `user`-сообщение;
 - BM25-подобный length-normalized retrieval с bounded top-k, score-gap gate и соседними fragments `±1`;
 - `TelemetryLedger.metrics()` вычисляет фактические `compression_rate` и `fallback_rate` из append-only ledger.
 - Partial lexical facet coverage не считается полной выборкой и приводит к conservative fallback.
@@ -303,7 +303,7 @@ HCO не является fork или урезанной сборкой полн
 - correctness не зависит от добровольного retrieval tool call модели;
 - package не содержит Headroom proxy, MCP server, agent wrappers или Kompress ML runtime;
 - mandatory evidence coverage и conservative fallback являются центральным контрактом;
-- основной HCO package — 8 Python-файлов и около 954 строк против сотен файлов универсального Headroom package.
+- основной HCO package — 8 Python-файлов и 1 199 физических строк исходного Python-кода в wheel `0.1.11` против сотен файлов универсального Headroom package.
 
 Прямых imports Headroom и длинных скопированных блоков в HCO package не обнаружено. Headroom указан как источник архитектурной идеи и исследовательский upstream.
 

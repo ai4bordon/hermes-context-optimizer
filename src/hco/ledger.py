@@ -140,11 +140,17 @@ class TelemetryLedger:
             for event in request_events
         )
         fallbacks = sum(event["decision"] == "full_fallback" for event in request_events)
+        blocked = sum(event["decision"] == "blocked" for event in request_events)
+        errors = sum(event["decision"] == "error" for event in request_events)
         return {
             "tool_results": len(tool_events),
             "compressed": compressed,
             "compression_rate": compressed / len(tool_events) if tool_events else 0.0,
+            "llm_requests": len(request_events),
             "optimized_requests": optimized,
             "fallbacks": fallbacks,
-            "fallback_rate": fallbacks / optimized if optimized else 0.0,
+            "blocked": blocked,
+            "errors": errors,
+            "optimized_fallback_rate": fallbacks / optimized if optimized else 0.0,
+            "fallback_rate": fallbacks / len(request_events) if request_events else 0.0,
         }

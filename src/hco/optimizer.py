@@ -59,6 +59,11 @@ _SENSITIVE_KEY_RE = re.compile(
     r"(?ix)^(?:.*[_-])?(?:api[_-]?key|password|client[_-]?secret|access[_-]?token|refresh[_-]?token|oauth[_-]?token|session[_-]?id|telegram[_-]?bot[_-]?token|private[_-]?key|secret|key|token)$"
 )
 _NON_SECRET_VALUES = {"", "redacted", "masked", "none", "null", "example", "placeholder"}
+_QUERY_BOILERPLATE_TERMS = {
+    "also", "and", "answer", "decision", "evidence", "find", "from",
+    "give", "include", "provide", "record", "records", "return", "show",
+    "source", "using", "what", "which", "with",
+}
 
 
 def _search_tokens(value: str) -> list[str]:
@@ -72,6 +77,52 @@ def _search_tokens(value: str) -> list[str]:
             if len(part) >= 3 and part != folded
         )
     return tokens
+
+
+def _explicit_ids_in(value: str) -> set[str]:
+    """Return full-token explicit identifiers present in ``value``.
+
+    Uses the boundary-aware scan regex rather than substring search so that
+    ``SRC-044`` does not match the identifier ``SRC-0440``.
+    """
+    return {
+        match.group(0).casefold()
+        for match in _EXPLICIT_IDENTIFIER_SCAN_RE.finditer(value)
+    }
+
+
+def _validated_compact_hashes(value: str) -> tuple[list[str], bool]:
+    """Extract hashes only from canonical, non-nested compact envelopes."""
+    blocks = list(_COMPACT_BLOCK_RE.finditer(value))
+    hco_looking = any(
+        marker in value for marker in ("<hco-compact", "</hco-compact>", "<hco source_hash=")
+    )
+    if not blocks:
+        return [], not hco_looking
+    if value.count("<hco-compact") != len(blocks) or value.count("</hco-compact>") != len(blocks):
+        return [], False
+
+    hashes: list[str] = []
+    remainder_parts: list[str] = []
+    cursor = 0
+    for block in blocks:
+        remainder_parts.append(value[cursor:block.start()])
+        text = block.group(0)
+        envelope_hash = block.group(1)
+        markers = _MARKER_RE.findall(text)
+        if (
+            text.count("<hco-compact") != 1
+            or text.count("</hco-compact>") != 1
+            or markers != [envelope_hash]
+        ):
+            return [], False
+        hashes.append(envelope_hash)
+        cursor = block.end()
+    remainder_parts.append(value[cursor:])
+    remainder = "".join(remainder_parts)
+    if any(marker in remainder for marker in ("<hco-compact", "</hco-compact>", "<hco source_hash=")):
+        return [], False
+    return hashes, True
 
 
 @dataclass(frozen=True)
@@ -372,7 +423,13 @@ class ContextOptimizer:
                     match.group(1) for match in _INCOMPLETE_MARKER_RE.finditer(content)
                 )
                 paginated_hashes.update(_PAGINATED_MARKER_RE.findall(content))
-                hashes.extend(_MARKER_RE.findall(content))
+                message_hashes, valid_envelopes = _validated_compact_hashes(content)
+                if not valid_envelopes:
+                    return PreparedRequest(
+                        messages=messages,
+                        receipt=CoverageReceipt("error", False),
+                    )
+                hashes.extend(message_hashes)
         if incomplete_hashes:
             return PreparedRequest(
                 messages=messages,
@@ -414,13 +471,18 @@ class ContextOptimizer:
                 additions.extend(
                     fragment["content"] for fragment in selected_by_hash[source_hash]
                 )
+        fragment_block = "<hco-proactive-fragments>\n" + json.dumps(
+            additions, ensure_ascii=False, separators=(",", ":")
+        ) + "\n</hco-proactive-fragments>"
         expanded = copy.deepcopy(messages)
-        expanded.append({
-            "role": "user",
-            "content": "<hco-proactive-fragments>\n" + json.dumps(
-                additions, ensure_ascii=False, separators=(",", ":")
-            ) + "\n</hco-proactive-fragments>",
-        })
+        if (
+            expanded
+            and expanded[-1].get("role") == "user"
+            and isinstance(expanded[-1].get("content"), str)
+        ):
+            expanded[-1]["content"] = expanded[-1]["content"] + "\n" + fragment_block
+        else:
+            expanded.append({"role": "user", "content": fragment_block})
         return PreparedRequest(
             messages=expanded,
             receipt=CoverageReceipt("proactive_expand", True, tuple(dict.fromkeys(hashes))),
@@ -462,18 +524,73 @@ class ContextOptimizer:
                 matches = [
                     fragment
                     for fragment in fragments
-                    if identifier in json.dumps(
-                        fragment["content"], ensure_ascii=False, default=str
-                    ).casefold()
+                    if identifier in _explicit_ids_in(
+                        json.dumps(fragment["content"], ensure_ascii=False, default=str)
+                    )
                 ]
                 if len(matches) != 1:
                     return [], False
                 fragment = matches[0]
                 selected_by_position[int(fragment["position"])] = fragment
             selected = [selected_by_position[position] for position in sorted(selected_by_position)]
-            if len(selected) > 8:
+            if len(selected) > 4:
                 return [], False
-            return selected, True
+            query_without_ids = _EXPLICIT_IDENTIFIER_SCAN_RE.sub(" ", query)
+            lexical_terms = {
+                term for term in _search_tokens(query_without_ids)
+                if len(term) >= 3 and term not in _QUERY_BOILERPLATE_TERMS
+            }
+            corpus_documents = [
+                _search_tokens(json.dumps(fragment["content"], ensure_ascii=False, default=str))
+                for fragment in fragments
+            ]
+            rare_limit = max(3, math.ceil(len(fragments) * 0.02))
+            meaningful_terms = {
+                term for term in lexical_terms
+                if 0 < sum(term in document for document in corpus_documents) <= rare_limit
+            }
+            selected_documents = [
+                _search_tokens(json.dumps(fragment["content"], ensure_ascii=False, default=str))
+                for fragment in selected
+            ]
+            selected_matched_terms = {
+                term for term in meaningful_terms
+                if any(term in document for document in selected_documents)
+            }
+            uncovered = set(meaningful_terms - selected_matched_terms)
+            lexical_positions: set[int] = set()
+            while uncovered:
+                candidates: list[tuple[int, int, dict[str, Any]]] = []
+                for fragment, document in zip(fragments, corpus_documents):
+                    position = int(fragment["position"])
+                    if position in selected_by_position:
+                        continue
+                    gain = len(uncovered.intersection(document))
+                    if gain:
+                        candidates.append((gain, -position, fragment))
+                if not candidates or len(selected_by_position) >= 4:
+                    return [], False
+                _, _, fragment = max(candidates, key=lambda item: (item[0], item[1]))
+                position = int(fragment["position"])
+                selected_by_position[position] = fragment
+                lexical_positions.add(position)
+                uncovered.difference_update(corpus_documents[position])
+
+            positions = set(selected_by_position)
+            for position in lexical_positions:
+                positions.update(
+                    candidate for candidate in (position - 1, position + 1)
+                    if 0 <= candidate < len(fragments)
+                )
+            if len(positions) > 8:
+                return [], False
+            final_documents = [corpus_documents[position] for position in sorted(positions)]
+            if any(
+                not any(term in document for document in final_documents)
+                for term in meaningful_terms
+            ):
+                return [], False
+            return [fragments[position] for position in sorted(positions)], True
 
         if not terms:
             return [], False
@@ -564,6 +681,20 @@ class ContextOptimizer:
                 return originals.get(source_hash, match.group(0))
 
             message["content"] = _COMPACT_BLOCK_RE.sub(expand_block, content)
+        combined = "\n".join(
+            str(message.get("content", ""))
+            for message in expanded
+            if isinstance(message.get("content"), str)
+        )
+        for source_hash, original in originals.items():
+            if original not in combined:
+                return PreparedRequest(messages=messages, receipt=CoverageReceipt("error", False))
+        if any(
+            isinstance(message.get("content"), str)
+            and _COMPACT_BLOCK_RE.search(message["content"])
+            for message in expanded
+        ):
+            return PreparedRequest(messages=messages, receipt=CoverageReceipt("error", False))
         return PreparedRequest(
             messages=expanded,
             receipt=CoverageReceipt("full_fallback", True, tuple(dict.fromkeys(hashes))),

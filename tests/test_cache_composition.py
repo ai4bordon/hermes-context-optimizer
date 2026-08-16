@@ -74,6 +74,69 @@ def test_proactive_fragments_are_appended_without_mutating_history(tmp_path) -> 
     assert "EV-0050" in prepared[-1]["content"]
 
 
+def test_proactive_fragments_merge_into_trailing_user_message(tmp_path) -> None:
+    middleware = HCOMiddleware(
+        store_path=tmp_path / "store.sqlite3",
+        ledger_path=tmp_path / "telemetry.sqlite3",
+        min_chars=10,
+        strict=True,
+    )
+    rows = [{"id": f"EV-{i:04d}", "detail": f"detail-{i}"} for i in range(100)]
+    compact = middleware.tool_execution(
+        next_call=lambda _args: json.dumps(rows),
+        tool_name="search_files", args={}, session_id="session-a",
+        tool_call_id="call-1", api_request_id="tool-1",
+    )
+    history = [
+        {"role": "system", "content": "stable-system"},
+        {"role": "user", "content": "old turn"},
+        {"role": "assistant", "content": "old answer"},
+        {"role": "tool", "tool_call_id": "call-1", "content": compact},
+        {"role": "user", "content": "Покажи EV-0050"},
+    ]
+
+    original = json.loads(json.dumps(history))
+    prepared = middleware.llm_request(
+        request={"messages": history}, session_id="session-a", api_request_id="llm-1"
+    )["request"]["messages"]
+
+    assert prepared[:-1] == original[:-1]
+    assert prepared[-1]["content"].startswith(original[-1]["content"])
+    roles = [message["role"] for message in prepared]
+    assert not any(a == b == "user" for a, b in zip(roles, roles[1:]))
+    assert "<hco-proactive-fragments>" in prepared[-1]["content"]
+    assert "EV-0050" in prepared[-1]["content"]
+
+
+def test_proactive_fragments_append_after_assistant(tmp_path) -> None:
+    middleware = HCOMiddleware(
+        store_path=tmp_path / "store.sqlite3",
+        ledger_path=tmp_path / "telemetry.sqlite3",
+        min_chars=10,
+        strict=True,
+    )
+    rows = [{"id": f"EV-{i:04d}", "detail": f"detail-{i}"} for i in range(100)]
+    compact = middleware.tool_execution(
+        next_call=lambda _args: json.dumps(rows),
+        tool_name="search_files", args={}, session_id="session-a",
+        tool_call_id="call-1", api_request_id="tool-1",
+    )
+    history = [
+        {"role": "system", "content": "stable-system"},
+        {"role": "user", "content": "Расскажи про EV-0050"},
+        {"role": "tool", "tool_call_id": "call-1", "content": compact},
+        {"role": "assistant", "content": "old answer"},
+    ]
+
+    prepared = middleware.llm_request(
+        request={"messages": history}, session_id="session-a", api_request_id="llm-1"
+    )["request"]["messages"]
+
+    assert prepared[-1]["role"] == "user"
+    assert "<hco-proactive-fragments>" in prepared[-1]["content"]
+    assert "EV-0050" in prepared[-1]["content"]
+
+
 def test_disabled_plugin_is_exact_baseline_by_not_registering(tmp_path, monkeypatch) -> None:
     import sys
     import types

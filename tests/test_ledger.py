@@ -99,7 +99,7 @@ def test_ledger_reports_compression_and_fallback_rates(tmp_path) -> None:
     ledger = TelemetryLedger(tmp_path / "ledger.sqlite3")
     for decision in ("compact", "passthrough"):
         ledger.append(event_type="tool_result", attempt_id=decision, decision=decision, data={})
-    for decision in ("proactive_expand", "proactive_expand", "full_fallback"):
+    for decision in ("proactive_expand", "proactive_expand", "full_fallback", "blocked", "error"):
         ledger.append(event_type="llm_request", attempt_id=decision, decision=decision, data={})
 
     metrics = ledger.metrics()
@@ -107,6 +107,10 @@ def test_ledger_reports_compression_and_fallback_rates(tmp_path) -> None:
     assert metrics["tool_results"] == 2
     assert metrics["compressed"] == 1
     assert metrics["compression_rate"] == 0.5
+    assert metrics["llm_requests"] == 5
     assert metrics["optimized_requests"] == 3
     assert metrics["fallbacks"] == 1
-    assert metrics["fallback_rate"] == 1 / 3
+    assert metrics["blocked"] == 1
+    assert metrics["errors"] == 1
+    assert metrics["optimized_fallback_rate"] == 1 / 3
+    assert metrics["fallback_rate"] == 1 / 5
