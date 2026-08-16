@@ -83,6 +83,11 @@ class HCOMiddleware:
                 "tool_name": tool_name,
                 "tool_call_id": tool_call_id,
                 "source_hash": compact.source_hash,
+                "original_chars": len(result),
+                "wire_chars": len(compact.content),
+                "estimated_context_chars_avoided": max(0, len(result) - len(compact.content)),
+                "model": _string_or_empty(_.get("model")),
+                "provider": _string_or_empty(_.get("provider")),
             },
         )
         return compact.content
@@ -110,6 +115,11 @@ class HCOMiddleware:
             data={
                 "session_id_hash": _opaque_id(session_id),
                 "coverage_receipt": receipt,
+                "request_chars_before": _messages_chars(messages),
+                "request_chars_after": _messages_chars(prepared.messages),
+                "model": _string_or_empty(request.get("model") or _.get("model")),
+                "provider": _string_or_empty(request.get("provider") or _.get("provider")),
+                "provider_usage": _provider_usage(_.get("provider_usage")),
             },
         )
         self._harden_state()
@@ -127,3 +137,19 @@ def _opaque_id(value: str) -> str:
     import hashlib
 
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:24] if value else ""
+
+
+def _string_or_empty(value: Any) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def _messages_chars(messages: list[dict[str, Any]]) -> int:
+    return sum(len(content) for message in messages if isinstance((content := message.get("content")), str))
+
+
+def _provider_usage(value: Any) -> dict[str, int] | None:
+    if not isinstance(value, dict):
+        return None
+    allowed = ("prompt_tokens", "completion_tokens", "reasoning_tokens", "cached_tokens", "total_tokens")
+    usage = {key: item for key in allowed if isinstance((item := value.get(key)), int) and not isinstance(item, bool) and item >= 0}
+    return usage or None

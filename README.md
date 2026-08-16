@@ -334,3 +334,14 @@ Apache License 2.0. См. `LICENSE`.
 Headroom указан как источник архитектурной идеи; полный Headroom runtime/proxy не включён в HCO package.
 
 Тестирование HCO в дополнительных окружениях приветствуется. Если вы обнаружили ошибку или несовместимость, пожалуйста, создайте GitHub Issue с обезличенным воспроизводимым примером.
+## Локальный telemetry dashboard
+
+После установки пакета dashboard запускается только на localhost и читает HCO state в режиме read-only:
+
+```bash
+hco-dashboard --home "$HCO_HOME"
+```
+
+Открыть `http://127.0.0.1:8765/`. API snapshot доступен на `/api/snapshot`, health check — на `/healthz`.
+
+Dashboard показывает decisions HCO, размеры payload до/после обработки, estimated context chars avoided, coverage, fallbacks, ошибки, сохранённые sources и actual provider tokens. Actual tokens отображаются только если host runtime передал `provider_usage`; иначе значение честно `UNKNOWN`.
